@@ -91,6 +91,10 @@ TORCH_MINOR = int(torch.__version__.split(".")[1])
 cmdclass = {}
 ext_modules = []
 
+# We want this even if SKIP_CUDA_BUILD because when we run python setup.py sdist we want the .hpp
+# files included in the source distribution, in case the user compiles from source.
+subprocess.run(["git", "submodule", "update", "--init", "csrc/cutlass"])
+
 raise_if_cuda_home_none("--quant-matmul")
 # Check, if CUDA11 is installed for compute capability 8.0
 cc_flag = []
