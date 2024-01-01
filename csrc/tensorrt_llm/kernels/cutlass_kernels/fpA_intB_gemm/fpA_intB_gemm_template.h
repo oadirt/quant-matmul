@@ -130,7 +130,7 @@ void generic_mixed_gemm_kernelLauncher(const T* A, const WeightType* B, const T*
         ? n
         : k * GemmKernel::kInterleave;
 
-    if (weight_scales == nullptr)
+    if (hasScale(QuantOp) && weight_scales == nullptr)
     {
         throw std::runtime_error("Weight scales must always be set to a non-null value.");
     }
@@ -492,7 +492,7 @@ void CutlassFpAIntBGemmRunner<T, WeightType, QuantOp>::gemm(const void* A, const
 {
     TLLM_LOG_DEBUG(__PRETTY_FUNCTION__);
 
-    if constexpr (QuantOp == cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY)
+    if constexpr (QuantOp == cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY || QuantOp == cutlass::WeightOnlyQuantOp::PER_TENSOR_ONLY)
     {
         dispatch_to_arch<tkc::EpilogueOpDefault>((const T*) A, (const WeightType*) B, (const T*) weight_scales, nullptr,
             nullptr, (T*) C, m, n, k, k, 1.f, gemmConfig, workspace_ptr, workspace_bytes, stream, nullptr);

@@ -260,21 +260,21 @@ public:
         // The last kblock is loaded in the prolog
         iterator_A.load(tb_frag_A);
         iterator_B.load(tb_frag_B);
-        iterator_scale.load(tb_frag_scales);
+        if constexpr (hasScale(QuantOp)) { iterator_scale.load(tb_frag_scales); }
 
         ++iterator_A;
         ++iterator_B;
 
         this->smem_iterator_A_.store(transformA(tb_frag_A));
         this->smem_iterator_B_.store(ldg_converter(tb_frag_B));
-        this->smem_iterator_scale_.store(transformScale(tb_frag_scales));
+        if constexpr (hasScale(QuantOp)) { this->smem_iterator_scale_.store(transformScale(tb_frag_scales)); }
 
         ++this->smem_iterator_A_;
         ++this->smem_iterator_B_;
 
         __syncthreads();
 
-        warp_dequantizer_.load(warp_frag_scales);
+        if constexpr (hasScale(QuantOp)) { warp_dequantizer_.load(warp_frag_scales); }
 
         // Pair of fragments used to overlap shared memory loads and math instructions
         WarpFragmentA warp_frag_A[2];
@@ -380,7 +380,7 @@ public:
 
                 typename TransformBAfterLDS::result_type converted_frag_B
                     = lds_converter(warp_frag_B[warp_tileB_k_load_offset % 2]);
-                warp_dequantizer_.dequantize(converted_frag_B, warp_frag_scales);
+                if constexpr (hasScale(QuantOp)) { warp_dequantizer_.dequantize(converted_frag_B, warp_frag_scales); }
                 run_warp_mma(
                     warp_mma, accum, warp_frag_A[warp_mma_k % 2], converted_frag_B, accum, warp_tileB_k_compute_offset);
             }

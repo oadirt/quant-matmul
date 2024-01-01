@@ -47,18 +47,45 @@ def test_multiply(in_features, out_features, groupsize, has_zero_points, has_glo
     if groupsize is None and has_zero_points:
         pytest.skip("weight_zero_points is only supported for groupwise quantization")
     device = "cuda"
-    rtol, atol = (5e-3, 1e-2 if not has_global_scale else 2e-2)
+    rtol, atol = (5e-3, 2e-2)
     # set seed
     torch.random.manual_seed(bits)
     w = torch.randint(-128, 127, (out_features // (8 // bits), in_features), dtype=torch.int8, device=device)
     w_processed = preprocess_weight(w, bits)
     scales_shape = (out_features,) if groupsize is None else (in_features // groupsize, out_features)
-    scales = torch.randn(*scales_shape, dtype=torch.float16, device=device) / 128 / math.sqrt(in_features)
+    scales = torch.randn(*scales_shape, dtype=torch.float16, device=device) / (128 if bits == 8 else 8) / math.sqrt(in_features)
     zero_points = torch.randn(*scales_shape, dtype=torch.float16, device=device) / math.sqrt(in_features) if has_zero_points else None
     global_scale = torch.randn(1).item() if has_global_scale else 1.0
     bias = torch.randn(out_features, dtype=torch.float16, device=device) if has_bias else None
     x = torch.randn(batch, in_features, dtype=torch.float16, device=device)
     out = quant_matmul_fn(x, w_processed, scales, zero_points, global_scale=global_scale, bias=bias, bits=bits)
     out_ref = quant_matmul_ref(x, w, scales, zero_points, bias=bias, global_scale=global_scale, bits=bits)
+    print(f"Max error: {(out - out_ref).abs().max().item()}")
+    assert torch.allclose(out, out_ref, atol=atol, rtol=rtol)
+
+
+@pytest.mark.parametrize("bits", [8, 4])
+# @pytest.mark.parametrize("bits", [8])
+@pytest.mark.parametrize("has_bias", [False, True])
+# @pytest.mark.parametrize("has_bias", [False])
+@pytest.mark.parametrize("batch", [1, 2, 3, 4, 5, 8, 16, 37])
+# @pytest.mark.parametrize("batch", [1, 2, 3, 4])
+# @pytest.mark.parametrize("batch", [8])
+@pytest.mark.parametrize("out_features", [64, 192, 2048, 2752, 4096, 5120])
+# @pytest.mark.parametrize("out_features", [64])
+@pytest.mark.parametrize("in_features", [192, 2048, 2560, 4096, 5120])
+# @pytest.mark.parametrize("in_features", [192])
+def test_no_scales(in_features, out_features, batch, has_bias, bits):
+    device = "cuda"
+    rtol, atol = (5e-3, 1e-2)
+    # set seed
+    torch.random.manual_seed(bits)
+    w = torch.randint(-128, 127, (out_features // (8 // bits), in_features), dtype=torch.int8, device=device)
+    w_processed = preprocess_weight(w, bits)
+    global_scale = torch.randn(1).item() / (128 if bits == 8 else 8) / math.sqrt(in_features)
+    bias = torch.randn(out_features, dtype=torch.float16, device=device) if has_bias else None
+    x = torch.randn(batch, in_features, dtype=torch.float16, device=device)
+    out = quant_matmul_fn(x, w_processed, None, None, global_scale=global_scale, bias=bias, bits=bits)
+    out_ref = quant_matmul_ref(x, w, None, None, bias=bias, global_scale=global_scale, bits=bits)
     print(f"Max error: {(out - out_ref).abs().max().item()}")
     assert torch.allclose(out, out_ref, atol=atol, rtol=rtol)

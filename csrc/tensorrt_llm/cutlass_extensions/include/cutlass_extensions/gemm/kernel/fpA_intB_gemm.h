@@ -303,7 +303,7 @@ struct GemmFpAIntB
             return Status::kErrorMisalignedOperand;
         }
 
-        if (!args.ref_scale.good())
+        if (hasScale(Mma::QuantOp) && !args.ref_scale.good())
         {
             return Status::kErrorNotSupported;
         }

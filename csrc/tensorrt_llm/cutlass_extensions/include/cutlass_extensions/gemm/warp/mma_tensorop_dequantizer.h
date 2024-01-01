@@ -502,7 +502,7 @@ public:
     using TensorRef = TensorRef<ElementScale, Layout>;
 
     static constexpr WeightOnlyQuantOp QuantOp = QuantOp_;
-    static_assert(QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY, "");
+    static_assert(QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY || QuantOp == WeightOnlyQuantOp::PER_TENSOR_ONLY, "");
 
     CUTLASS_DEVICE
     MmaTensorOpDequantizer(TensorRef smem_scales, const int warp_idx_n, const int lane_idx)
@@ -588,7 +588,7 @@ public:
     using TensorRef = TensorRef<ElementScale, Layout>;
 
     static constexpr WeightOnlyQuantOp QuantOp = QuantOp_;
-    static_assert(QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY, "");
+    static_assert(QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY || QuantOp == WeightOnlyQuantOp::PER_TENSOR_ONLY, "");
 
     CUTLASS_DEVICE
     MmaTensorOpDequantizer(TensorRef smem_scales, const int warp_idx_n, const int lane_idx)

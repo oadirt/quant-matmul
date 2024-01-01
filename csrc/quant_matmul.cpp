@@ -15,23 +15,17 @@
 #include "tensorrt_llm/kernels/weightOnlyBatchedGemv/kernelLauncher.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/fpA_intB_gemm.h"
 
-#define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
+#include "static_switch.h"
 
-#define BOOL_SWITCH(COND, CONST_NAME, ...)                                           \
-    [&] {                                                                            \
-        if (COND) {                                                                  \
-            static constexpr bool CONST_NAME = true;                                 \
-            return __VA_ARGS__();                                                    \
-        } else {                                                                     \
-            static constexpr bool CONST_NAME = false;                                \
-            return __VA_ARGS__();                                                    \
-        }                                                                            \
-    }()
+#define CHECK_SHAPE(x, ...) TORCH_CHECK(x.sizes() == torch::IntArrayRef({__VA_ARGS__}), #x " must have shape (" #__VA_ARGS__ ")")
 
 #define QUANTOP_SWITCH(QUANTOP, CONST_NAME, ...)                                                        \
     [&] {                                                                                               \
         if (QUANTOP == cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY) {                             \
             static constexpr auto CONST_NAME = cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY;       \
+            return __VA_ARGS__();                                                                       \
+        } else if (QUANTOP == cutlass::WeightOnlyQuantOp::PER_TENSOR_ONLY) {                            \
+            static constexpr auto CONST_NAME = cutlass::WeightOnlyQuantOp::PER_TENSOR_ONLY;             \
             return __VA_ARGS__();                                                                       \
         } else if (QUANTOP == cutlass::WeightOnlyQuantOp::FINEGRAINED_SCALE_ONLY) {                     \
             static constexpr auto CONST_NAME = cutlass::WeightOnlyQuantOp::FINEGRAINED_SCALE_ONLY;      \
@@ -53,7 +47,8 @@ void dispatch_to_weight_only_batched_gemv(const half* A, const WeightType* B, co
         = std::is_same_v<WeightType, cutlass::uint4b_t> ? WeightOnlyQuantType::Int4b : WeightOnlyQuantType::Int8b;
 
     // Convert QuantType
-    WeightOnlyType weight_only_type = QuantOp == cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY
+    WeightOnlyType weight_only_type =
+        (QuantOp == cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY || QuantOp == cutlass::WeightOnlyQuantOp::PER_TENSOR_ONLY)
         ? WeightOnlyType::PerChannel
         : WeightOnlyType::GroupWise;
 
@@ -119,7 +114,8 @@ at::Tensor preprocess_weight(at::Tensor quantized_weight, int bits) {
     return out;
 }
 
-at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight, const at::Tensor weight_scales,
+at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
+                        const c10::optional<at::Tensor> weight_scales_,
                         const c10::optional<at::Tensor> weight_zero_points_, float global_scale,
                         const c10::optional<at::Tensor> bias_, int bits) {
 
@@ -127,27 +123,35 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight, const a
     const int m = input.size(0);
     const int k = input.size(1);
     const int n = weight.size(0);
-    const bool is_finegrained = weight_scales.dim() == 2;
-    const int group_size = !is_finegrained ? k : k / weight_scales.size(0);
-    TORCH_CHECK(k % group_size == 0);
-    if (is_finegrained) { TORCH_CHECK(group_size == 64 || group_size == 128, "Only support group size 64 and 128"); }
     TORCH_CHECK(n % 8 == 0);
 
     TORCH_CHECK(input.dtype() == torch::kFloat16);
     TORCH_CHECK(weight.dtype() == torch::kInt8);
-    TORCH_CHECK(weight_scales.dtype() == torch::kFloat16);
     TORCH_CHECK(input.is_cuda());
     TORCH_CHECK(weight.is_cuda());
-    TORCH_CHECK(weight_scales.is_cuda());
     TORCH_CHECK(input.is_contiguous());
     TORCH_CHECK(weight.is_contiguous());
-    TORCH_CHECK(weight_scales.is_contiguous());
     CHECK_SHAPE(input, m, k);
     CHECK_SHAPE(weight, n, k / (8 / bits));
-    if (!is_finegrained) {
-        CHECK_SHAPE(weight_scales, n);
+
+    bool is_finegrained = false;
+    int group_size = k;
+    if (weight_scales_.has_value()) {
+        auto weight_scales = weight_scales_.value();
+        TORCH_CHECK(weight_scales.dtype() == torch::kFloat16);
+        TORCH_CHECK(weight_scales.is_cuda());
+        TORCH_CHECK(weight_scales.is_contiguous());
+        is_finegrained = weight_scales.dim() == 2;
+        group_size = !is_finegrained ? k : k / weight_scales.size(0);
+        TORCH_CHECK(k % group_size == 0);
+        if (is_finegrained) { TORCH_CHECK(group_size == 64 || group_size == 128, "Only support group size 64 and 128"); }
+        if (!is_finegrained) {
+            CHECK_SHAPE(weight_scales, n);
+        } else {
+            CHECK_SHAPE(weight_scales, k / group_size, n);
+        }
     } else {
-        CHECK_SHAPE(weight_scales, k / group_size, n);
+        TORCH_CHECK(!weight_zero_points_.has_value(), "If weight_scales is None, weight_zero_points must also be None");
     }
 
     if (weight_zero_points_.has_value()) {
@@ -179,7 +183,7 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight, const a
     if (has_workspace) { workspace = at::empty({1 << 22}, opts.dtype(torch::kInt8)); }
 
     auto quantop = !is_finegrained
-        ? cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY
+        ? (weight_scales_.has_value() ? cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY : cutlass::WeightOnlyQuantOp::PER_TENSOR_ONLY)
         : (!weight_zero_points_.has_value() ? cutlass::WeightOnlyQuantOp::FINEGRAINED_SCALE_ONLY : cutlass::WeightOnlyQuantOp::FINEGRAINED_SCALE_AND_ZEROS);
     BOOL_SWITCH(bits == 4, kIs4Bits, [&] {
         using WeightType = std::conditional_t<kIs4Bits, cutlass::uint4b_t, uint8_t>;
@@ -187,7 +191,7 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight, const a
             gemm_fp16_int_bias<WeightType, kQuantOp>(
                 reinterpret_cast<half *>(input.data_ptr()),
                 reinterpret_cast<WeightType *>(weight.data_ptr()),
-                reinterpret_cast<half *>(weight_scales.data_ptr()),
+                weight_scales_.has_value()? reinterpret_cast<half *>(weight_scales_.value().data_ptr()) : nullptr,
                 weight_zero_points_.has_value() ? reinterpret_cast<half *>(weight_zero_points_.value().data_ptr()) : nullptr,
                 bias_.has_value() ? reinterpret_cast<half *>(bias_.value().data_ptr()) : nullptr,
                 reinterpret_cast<half *>(out.data_ptr()),

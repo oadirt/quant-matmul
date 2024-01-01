@@ -23,6 +23,7 @@ namespace kernels
 namespace cutlass_kernels
 {
 template class CutlassFpAIntBGemmRunner<half, uint8_t, cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY>;
+template class CutlassFpAIntBGemmRunner<half, uint8_t, cutlass::WeightOnlyQuantOp::PER_TENSOR_ONLY>;
 } // namespace cutlass_kernels
 } // namespace kernels
 } // namespace tensorrt_llm

@@ -83,7 +83,7 @@ struct DqMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB, Ele
 
     using OperatorInfo = arch::DetagOperator<Operator_>;
     using Operator = typename OperatorInfo::Operator;
-    static_assert(OperatorInfo::QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY, "");
+    static_assert(OperatorInfo::QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY || OperatorInfo::QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY, "");
 
     static constexpr bool DqAfterLDG = platform::is_same<arch::OpMultiplyAdd, Operator>::value;
     static constexpr bool arch_has_bf16_mma = ArchTag::kMinComputeCapability >= 80;
@@ -179,7 +179,7 @@ struct DqMma<ElementA, LayoutA, kAlignmentA, ElementB, LayoutB, kAlignmentB, Ele
 
     using OperatorInfo = arch::DetagOperator<Operator_>;
     using Operator = typename OperatorInfo::Operator;
-    static_assert(OperatorInfo::QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY, "");
+    static_assert(OperatorInfo::QuantOp == WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY || OperatorInfo::QuantOp == WeightOnlyQuantOp::PER_TENSOR_ONLY, "");
 
     static constexpr bool DqAfterLDG = platform::is_same<arch::OpMultiplyAdd, Operator>::value;
     static constexpr bool arch_has_bf16_mma = ArchTag::kMinComputeCapability >= 80;

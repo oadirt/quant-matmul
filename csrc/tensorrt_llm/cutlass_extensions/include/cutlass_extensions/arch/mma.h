@@ -58,6 +58,7 @@ struct OpMultiplyAddDequantizeInterleavedBToA;
 struct OpMultiplyAddDequantizeInterleavedBToA_percol_scale;
 struct OpMultiplyAddDequantizeInterleavedBToA_fine_scale;
 struct OpMultiplyAddDequantizeInterleavedBToA_fine_scalebias;
+struct OpMultiplyAddDequantizeInterleavedBToA_pertensor;
 
 // The default just forwards the original operator
 template <typename MmaOp, WeightOnlyQuantOp QuantOp_>
@@ -83,6 +84,12 @@ template <>
 struct TagOperator<OpMultiplyAddDequantizeInterleavedBToA, WeightOnlyQuantOp::FINEGRAINED_SCALE_AND_ZEROS>
 {
     using TaggedOperator = OpMultiplyAddDequantizeInterleavedBToA_fine_scalebias;
+};
+
+template <>
+struct TagOperator<OpMultiplyAddDequantizeInterleavedBToA, WeightOnlyQuantOp::PER_TENSOR_ONLY>
+{
+    using TaggedOperator = OpMultiplyAddDequantizeInterleavedBToA_pertensor;
 };
 
 // Here we instantiate some structs to "detag" the tagged operator. It splits it back to the original
@@ -114,6 +121,13 @@ struct DetagOperator<OpMultiplyAddDequantizeInterleavedBToA_fine_scalebias>
 {
     using Operator = OpMultiplyAddDequantizeInterleavedBToA;
     static constexpr WeightOnlyQuantOp QuantOp = WeightOnlyQuantOp::FINEGRAINED_SCALE_AND_ZEROS;
+};
+
+template <>
+struct DetagOperator<OpMultiplyAddDequantizeInterleavedBToA_pertensor>
+{
+    using Operator = OpMultiplyAddDequantizeInterleavedBToA;
+    static constexpr WeightOnlyQuantOp QuantOp = WeightOnlyQuantOp::PER_TENSOR_ONLY;
 };
 
 } // namespace arch

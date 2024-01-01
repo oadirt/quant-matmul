@@ -17,6 +17,7 @@
 #pragma once
 #include "tensorrt_llm/kernels/weightOnlyBatchedGemv/common.h"
 #include "tensorrt_llm/kernels/weightOnlyBatchedGemv/utility.h"
+#include "static_switch.h"
 
 namespace tensorrt_llm
 {
@@ -292,7 +293,7 @@ public:
 };
 
 template <typename ActType, WeightOnlyQuantType QType, typename WeightOnlyFlag, template <typename T> class ActOp,
-    bool Zero, bool Bias, bool ActScale, bool HasGlobalScale, int NPerBlock, int Batch, int BlockSize>
+    bool Scale, bool Zero, bool Bias, bool ActScale, bool HasGlobalScale, int NPerBlock, int Batch, int BlockSize>
 __device__ void weight_only_batched_gemv(const uint8_t* qweight, const ActType* scales, const ActType* zeros,
     const ActType* in, const ActType* act_scale, const ActType* bias, ActType* out, const int n, const int k, const uint32_t global_scale)
 {
@@ -341,7 +342,10 @@ __device__ void weight_only_batched_gemv(const uint8_t* qweight, const ActType* 
             uint8_t weights_quantized[Details::kBytePerThread];
             load<AccType>(weights_quantized,
                 qweight + idx * Interleave * k / Details::kElemsPerByte + local_k / Details::kElemsPerByte);
-            scale_loader.load(scale[idx], zero[idx], idx);
+            if constexpr (Scale)
+            {
+                scale_loader.load(scale[idx], zero[idx], idx);
+            }
             ActType weights_vec[Details::kElemsPerThread];
 #pragma unroll
             for (int i = 0; i < Details::kConvertIters; ++i)
@@ -361,8 +365,11 @@ __device__ void weight_only_batched_gemv(const uint8_t* qweight, const ActType* 
                     // register array
                     ActType2 v = *reinterpret_cast<ActType2*>(weights_vec + i * Details::kShuffleBasicTile
                         + j * Details::kShuffleContinous * Details::kShuffleBasicTile);
-                    v = __hfma2(
-                        v, ActTypeDetails<ActType>::to_vec2(scale[idx]), ActTypeDetails<ActType>::to_vec2(zero[idx]));
+                    if constexpr (Scale)
+                    {
+                        v = __hfma2(
+                            v, ActTypeDetails<ActType>::to_vec2(scale[idx]), ActTypeDetails<ActType>::to_vec2(zero[idx]));
+                    }
                     if constexpr (HasGlobalScale)
                     {
                         v = __hmul2(v, reinterpret_cast<const ActType2&>(global_scale));
@@ -476,38 +483,40 @@ template <typename ActType, WeightOnlyQuantType QType, typename WeightOnlyFlag, 
 __global__ void weight_only_batched_gemv_wrapper(const uint8_t* qweight, const ActType* scales, const ActType* zeros,
     const ActType* in, const ActType* act_scale, const ActType* bias, ActType* out, const int n, const int k, const float global_scale)
 {
-    if constexpr (std::is_same_v<ActType, half>)
-    {
-        if (global_scale == 1.f)
+    BOOL_SWITCH(scales != nullptr, Scale, [&] {
+        if constexpr (std::is_same_v<ActType, half>)
         {
-            weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, false, NPerBlock, Batch,
-                BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, 0);
+            if (global_scale == 1.f)
+            {
+                weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Scale, Zero, Bias, ActScale, false, NPerBlock, Batch,
+                    BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, 0);
+            }
+            else
+            {
+                __half2 _global_scale_f16 = __float2half2_rn(global_scale);
+                uint32_t global_scale_u = reinterpret_cast<uint32_t&>(_global_scale_f16);
+                weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Scale, Zero, Bias, ActScale, true, NPerBlock, Batch,
+                    BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, global_scale_u);
+            }
         }
-        else
+    #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800) && defined(ENABLE_BF16))
+        else if (std::is_same_v<ActType, nv_bfloat16>)
         {
-            __half2 _global_scale_f16 = __float2half2_rn(global_scale);
-            uint32_t global_scale_u = reinterpret_cast<uint32_t&>(_global_scale_f16);
-            weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, true, NPerBlock, Batch,
-                BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, global_scale_u);
+            if (global_scale == 1.f)
+            {
+                weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Scale, Zero, Bias, ActScale, false, NPerBlock, Batch,
+                    BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, 0);
+            }
+            else
+            {
+                __nv_bfloat162 _global_scale_f16 = __float2bfloat162_rn(global_scale);
+                uint32_t global_scale_u = reinterpret_cast<uint32_t&>(_global_scale_f16);
+                weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Scale, Zero, Bias, ActScale, true, NPerBlock, Batch,
+                    BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, global_scale_u);
+            }
         }
-    }
-#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800) && defined(ENABLE_BF16))
-    else if (std::is_same_v<ActType, nv_bfloat16>)
-    {
-        if (global_scale == 1.f)
-        {
-            weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, false, NPerBlock, Batch,
-                BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, 0);
-        }
-        else
-        {
-            __nv_bfloat162 _global_scale_f16 = __float2bfloat162_rn(global_scale);
-            uint32_t global_scale_u = reinterpret_cast<uint32_t&>(_global_scale_f16);
-            weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, true, NPerBlock, Batch,
-                BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, global_scale_u);
-        }
-    }
-#endif
+    #endif
+    });
 }
 
 template <WeightOnlyQuantType QType, typename WeightOnlyFlag, template <typename T> class ActOp, bool Zero, bool Bias,
