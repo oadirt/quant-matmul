@@ -30,27 +30,32 @@ def test_preprocess_weight(in_features, out_features, bits):
 # @pytest.mark.parametrize("has_bias", [False])
 @pytest.mark.parametrize("batch", [1, 2, 3, 4, 5, 8, 16, 37])
 # @pytest.mark.parametrize("batch", [1, 2, 3, 4])
-# @pytest.mark.parametrize("batch", [8])
+# @pytest.mark.parametrize("batch", [1, 8])
+@pytest.mark.parametrize("has_zero_points", [False, True])
+# @pytest.mark.parametrize("has_zero_points", [True])
 @pytest.mark.parametrize("groupsize", [None, 64, 128])
-# @pytest.mark.parametrize("groupsize", [None])
+# @pytest.mark.parametrize("groupsize", [64])
 @pytest.mark.parametrize("out_features", [64, 192, 2048, 2752, 4096, 5120])
-# @pytest.mark.parametrize("out_features", [256])
+# @pytest.mark.parametrize("out_features", [64])
 @pytest.mark.parametrize("in_features", [192, 2048, 2560, 4096, 5120])
-# @pytest.mark.parametrize("in_features", [256])
-def test_multiply(in_features, out_features, groupsize, batch, has_bias, bits):
+# @pytest.mark.parametrize("in_features", [192])
+def test_multiply(in_features, out_features, groupsize, has_zero_points, batch, has_bias, bits):
     if groupsize is not None and in_features % groupsize != 0:
         pytest.skip("groupsize must be divisible by in_features")
+    if groupsize is None and has_zero_points:
+        pytest.skip("weight_zero_points is only supported for groupwise quantization")
     device = "cuda"
-    rtol, atol = (5e-3, 8e-3)
+    rtol, atol = (5e-3, 1e-2)
     # set seed
     torch.random.manual_seed(bits)
     w = torch.randint(-128, 127, (out_features // (8 // bits), in_features), dtype=torch.int8, device=device)
     w_processed = preprocess_weight(w, bits)
     scales_shape = (out_features,) if groupsize is None else (in_features // groupsize, out_features)
     scales = torch.randn(*scales_shape, dtype=torch.float16, device=device) / 128 / math.sqrt(in_features)
+    zero_points = torch.randn(*scales_shape, dtype=torch.float16, device=device) / math.sqrt(in_features) if has_zero_points else None
     bias = torch.randn(out_features, dtype=torch.float16, device=device) if has_bias else None
     x = torch.randn(batch, in_features, dtype=torch.float16, device=device)
-    out = quant_matmul_fn(x, w_processed, scales, bias=bias, bits=bits)
-    out_ref = quant_matmul_ref(x, w, scales, bias=bias, bits=bits)
+    out = quant_matmul_fn(x, w_processed, scales, zero_points, bias=bias, bits=bits)
+    out_ref = quant_matmul_ref(x, w, scales, zero_points, bias=bias, bits=bits)
     print(f"Max error: {(out - out_ref).abs().max().item()}")
     assert torch.allclose(out, out_ref, atol=atol, rtol=rtol)

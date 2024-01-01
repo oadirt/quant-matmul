@@ -32,13 +32,16 @@ def preprocess_weight(weight, bits=4):
     return weight.contiguous()
 
 
-def quant_matmul_ref(x, quantized_weight, scales=None, global_scale=1.0, bias=None, bits=4):
+def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_scale=1.0, bias=None, bits=4):
     """
+    Weight will be dequantized as (quantized_weight * scales + zero_points) * global_scale
     Arguments:
         x: (..., in_features), fp16
         quantized_weight: (out_features, in_features) if bits == 8, (out_features // 2, in_features)
             if bits == 4, stored in int8
         scales: (in_features / group_size, out_features) or (out_features,), fp16
+        zero_points: (in_features / group_size, out_features) of (out_features,), fp16.
+           (i.e. groupwise quantization).
         global_scale: float
         bias: (out_features,), fp16
         bits: 4 or 8
@@ -60,19 +63,30 @@ def quant_matmul_ref(x, quantized_weight, scales=None, global_scale=1.0, bias=No
             assert w.shape[1] % groupsize == 0
             scales = repeat(scales, "ngroups n -> n (ngroups groupsize)", groupsize=groupsize)
         w *= scales
+    if zero_points is not None:
+        if zero_points.ndim == 1:
+            zero_points = rearrange(zero_points, "n -> n 1")
+        else:
+            groupsize = w.shape[1] // zero_points.shape[0]
+            assert w.shape[1] % groupsize == 0
+            zero_points = repeat(zero_points, "ngroups n -> n (ngroups groupsize)", groupsize=groupsize)
+        w += zero_points
     if global_scale != 1.0:
         w *= global_scale
     return F.linear(x, w, bias)
 
 
-def quant_matmul_fn(x, processed_weight, scales=None, global_scale=1.0, bias=None, bits=4):
+def quant_matmul_fn(x, processed_weight, scales=None, zero_points=None, global_scale=1.0, bias=None, bits=4):
     """
+    Weight will be dequantized as (quantized_weight * scales + zero_points) * global_scale
     Arguments:
         x: (..., in_features), fp16
         processed_weight: (out_features, in_features) if bits == 8, (out_features // 2, in_features)
             if bits == 4, stored in int8. The weight is in column-major format, returned by the
             preprocess_weight function.
         scales: (in_features / group_size, out_features) or (out_features,), fp16
+        zero_points: (in_features / group_size, out_features), fp16. Only supported if scales is 2D
+           (i.e. groupwise quantization).
         global_scale: float
         bias: (out_features,), fp16
         bits: 4 or 8
@@ -80,4 +94,4 @@ def quant_matmul_fn(x, processed_weight, scales=None, global_scale=1.0, bias=Non
         out: (..., out_features), fp16
     """
     assert global_scale == 1.0, "global_scale is not support yet"
-    return quant_matmul_cuda.quant_matmul(x, processed_weight, scales, bias, bits)
+    return quant_matmul_cuda.quant_matmul(x, processed_weight, scales, zero_points, bias, bits)
