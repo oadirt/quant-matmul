@@ -292,9 +292,9 @@ public:
 };
 
 template <typename ActType, WeightOnlyQuantType QType, typename WeightOnlyFlag, template <typename T> class ActOp,
-    bool Zero, bool Bias, bool ActScale, int NPerBlock, int Batch, int BlockSize>
+    bool Zero, bool Bias, bool ActScale, bool HasGlobalScale, int NPerBlock, int Batch, int BlockSize>
 __device__ void weight_only_batched_gemv(const uint8_t* qweight, const ActType* scales, const ActType* zeros,
-    const ActType* in, const ActType* act_scale, const ActType* bias, ActType* out, const int n, const int k)
+    const ActType* in, const ActType* act_scale, const ActType* bias, ActType* out, const int n, const int k, const uint32_t global_scale)
 {
     static_assert(NPerBlock == 1 || (NPerBlock % 2 == 0));
     using ActType2 = typename ActTypeDetails<ActType>::Vec2;
@@ -363,6 +363,10 @@ __device__ void weight_only_batched_gemv(const uint8_t* qweight, const ActType* 
                         + j * Details::kShuffleContinous * Details::kShuffleBasicTile);
                     v = __hfma2(
                         v, ActTypeDetails<ActType>::to_vec2(scale[idx]), ActTypeDetails<ActType>::to_vec2(zero[idx]));
+                    if constexpr (HasGlobalScale)
+                    {
+                        v = __hmul2(v, reinterpret_cast<const ActType2&>(global_scale));
+                    }
                     weights_f16[(i * Details::kShuffleStrided * Details::kShuffleBasicTile
                                     + j * Details::kShuffleBasicTile + 0)
                             * NPerBlock
@@ -470,18 +474,38 @@ __device__ void weight_only_batched_gemv(const uint8_t* qweight, const ActType* 
 template <typename ActType, WeightOnlyQuantType QType, typename WeightOnlyFlag, template <typename T> class ActOp,
     bool Zero, bool Bias, bool ActScale, int NPerBlock, int Batch, int BlockSize>
 __global__ void weight_only_batched_gemv_wrapper(const uint8_t* qweight, const ActType* scales, const ActType* zeros,
-    const ActType* in, const ActType* act_scale, const ActType* bias, ActType* out, const int n, const int k)
+    const ActType* in, const ActType* act_scale, const ActType* bias, ActType* out, const int n, const int k, const float global_scale)
 {
     if constexpr (std::is_same_v<ActType, half>)
     {
-        weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, NPerBlock, Batch,
-            BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k);
+        if (global_scale == 1.f)
+        {
+            weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, false, NPerBlock, Batch,
+                BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, 0);
+        }
+        else
+        {
+            __half2 _global_scale_f16 = __float2half2_rn(global_scale);
+            uint32_t global_scale_u = reinterpret_cast<uint32_t&>(_global_scale_f16);
+            weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, true, NPerBlock, Batch,
+                BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, global_scale_u);
+        }
     }
 #if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800) && defined(ENABLE_BF16))
     else if (std::is_same_v<ActType, nv_bfloat16>)
     {
-        weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, NPerBlock, Batch,
-            BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k);
+        if (global_scale == 1.f)
+        {
+            weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, false, NPerBlock, Batch,
+                BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, 0);
+        }
+        else
+        {
+            __nv_bfloat162 _global_scale_f16 = __float2bfloat162_rn(global_scale);
+            uint32_t global_scale_u = reinterpret_cast<uint32_t&>(_global_scale_f16);
+            weight_only_batched_gemv<ActType, QType, WeightOnlyFlag, ActOp, Zero, Bias, ActScale, true, NPerBlock, Batch,
+                BlockSize>(qweight, scales, zeros, in, act_scale, bias, out, n, k, global_scale_u);
+        }
     }
 #endif
 }
@@ -505,7 +529,7 @@ struct WeightOnlyBatchedGemvKernelLauncher
                     reinterpret_cast<const half*>(params.scales), reinterpret_cast<const half*>(params.zeros),
                     reinterpret_cast<const half*>(params.in), reinterpret_cast<const half*>(params.act_scale),
                     reinterpret_cast<const half*>(params.bias), reinterpret_cast<half*>(params.out), params.n,
-                    params.k);
+                    params.k, params.global_scale);
             }
             else
             {
@@ -514,7 +538,7 @@ struct WeightOnlyBatchedGemvKernelLauncher
                     reinterpret_cast<const half*>(params.scales), reinterpret_cast<const half*>(params.zeros),
                     reinterpret_cast<const half*>(params.in), reinterpret_cast<const half*>(params.act_scale),
                     reinterpret_cast<const half*>(params.bias), reinterpret_cast<half*>(params.out), params.n,
-                    params.k);
+                    params.k, params.global_scale);
             }
         }
 #if defined(ENABLE_BF16)
@@ -533,7 +557,7 @@ struct WeightOnlyBatchedGemvKernelLauncher
                     reinterpret_cast<const __nv_bfloat16*>(params.in),
                     reinterpret_cast<const __nv_bfloat16*>(params.act_scale),
                     reinterpret_cast<const __nv_bfloat16*>(params.bias), reinterpret_cast<__nv_bfloat16*>(params.out),
-                    params.n, params.k);
+                    params.n, params.k, params.global_scale);
             }
             else
             {
@@ -544,7 +568,7 @@ struct WeightOnlyBatchedGemvKernelLauncher
                     reinterpret_cast<const __nv_bfloat16*>(params.in),
                     reinterpret_cast<const __nv_bfloat16*>(params.act_scale),
                     reinterpret_cast<const __nv_bfloat16*>(params.bias), reinterpret_cast<__nv_bfloat16*>(params.out),
-                    params.n, params.k);
+                    params.n, params.k, params.global_scale);
             }
         }
 #endif

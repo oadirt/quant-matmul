@@ -94,7 +94,7 @@ public:
         char* workspace_ptr, const size_t workspace_bytes, cudaStream_t stream) override;
 
     void gemm_bias(const T* A, const WeightType* B, const T* weight_scales, const T* weight_zero_points,
-        const T* biases, T* C, int m, int n, int k, const int group_size,
+        const T* biases, T* C, int m, int n, int k, const int group_size, const float global_scale,
         char* workspace_ptr, const size_t workspace_bytes, cudaStream_t stream);
         // Disabled since the fused GEMM, activation kernels will not be used in v1.
 
@@ -111,12 +111,12 @@ public:
 private:
     template <typename EpilogueTag>
     void dispatch_to_arch(const T* A, const WeightType* B, const T* weight_scales, const T* weight_zero_points,
-        const T* biases, T* C, int m, int n, int k, const int group_size, tkc::CutlassGemmConfig gemm_config,
+        const T* biases, T* C, int m, int n, int k, const int group_size, const float global_scale, tkc::CutlassGemmConfig gemm_config,
         char* workspace_ptr, const size_t workspace_bytes, cudaStream_t stream, int* occupancy = nullptr);
 
     template <typename EpilogueTag>
     void run_gemm(const T* A, const WeightType* B, const T* weight_scales, const T* weight_zero_points,
-        const T* biases, T* C, int m, int n, int k, const int group_size,
+        const T* biases, T* C, int m, int n, int k, const int group_size, const float global_scale,
         char* workspace_ptr, const size_t workspace_bytes, cudaStream_t stream);
 
 private:

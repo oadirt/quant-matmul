@@ -93,5 +93,4 @@ def quant_matmul_fn(x, processed_weight, scales=None, zero_points=None, global_s
     Return:
         out: (..., out_features), fp16
     """
-    assert global_scale == 1.0, "global_scale is not support yet"
-    return quant_matmul_cuda.quant_matmul(x, processed_weight, scales, zero_points, bias, bits)
+    return quant_matmul_cuda.quant_matmul(x, processed_weight, scales, zero_points, global_scale, bias, bits)
