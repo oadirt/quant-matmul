@@ -80,10 +80,9 @@ void gemm_fp16_int_bias(const half* A, const WeightType* B, const half* weight_s
 
 }
 
-at::Tensor preprocess_weight(at::Tensor quantized_weight, int bits, int arch) {
+at::Tensor preprocess_weight(at::Tensor quantized_weight, int bits) {
 
     TORCH_CHECK(bits == 4 || bits == 8);
-    TORCH_CHECK(arch >= 70 && arch < 90);
     int rows = quantized_weight.size(0);
     int elts_per_byte = 8 / bits;
     int cols = quantized_weight.size(1) * elts_per_byte;

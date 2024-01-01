@@ -18,9 +18,9 @@ def test_preprocess_weight(in_features, out_features, bits):
     device = "cuda"
     # set seed
     torch.random.manual_seed(0)
-    w = torch.randint(-128, 127, (in_features, out_features // (8 // bits)), dtype=torch.int8, device=device)
+    w = torch.randint(-128, 127, (out_features // (8 // bits), in_features), dtype=torch.int8, device=device)
     w_processed = preprocess_weight(w, bits)
-    wpacked_ref = quant_matmul_cuda.preprocess_weight(w.cpu(), bits, 80).to(device)
+    wpacked_ref = quant_matmul_cuda.preprocess_weight(w.T.cpu().contiguous(), bits).to(device)
     assert torch.equal(w_processed, wpacked_ref)
 
 
@@ -41,16 +41,16 @@ def test_multiply(in_features, out_features, groupsize, batch, has_bias, bits):
     if groupsize is not None and in_features % groupsize != 0:
         pytest.skip("groupsize must be divisible by in_features")
     device = "cuda"
-    atol, rtol = (5e-3, 8e-3)
+    rtol, atol = (5e-3, 8e-3)
     # set seed
     torch.random.manual_seed(bits)
-    w = torch.randint(-128, 127, (in_features, out_features // (8 // bits)), dtype=torch.int8, device=device)
+    w = torch.randint(-128, 127, (out_features // (8 // bits), in_features), dtype=torch.int8, device=device)
     w_processed = preprocess_weight(w, bits)
     scales_shape = (out_features,) if groupsize is None else (in_features // groupsize, out_features)
     scales = torch.randn(*scales_shape, dtype=torch.float16, device=device) / 128 / math.sqrt(in_features)
     bias = torch.randn(out_features, dtype=torch.float16, device=device) if has_bias else None
     x = torch.randn(batch, in_features, dtype=torch.float16, device=device)
     out = quant_matmul_fn(x, w_processed, scales, bias=bias, bits=bits)
-    out_ref = quant_matmul_ref(x, w.T, scales, bias=bias, bits=bits)
+    out_ref = quant_matmul_ref(x, w, scales, bias=bias, bits=bits)
     print(f"Max error: {(out - out_ref).abs().max().item()}")
     assert torch.allclose(out, out_ref, atol=atol, rtol=rtol)
