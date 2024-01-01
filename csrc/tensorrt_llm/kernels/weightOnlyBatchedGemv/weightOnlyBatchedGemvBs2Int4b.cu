@@ -22,6 +22,13 @@ namespace kernels
 
 template struct WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
     IdentityActivation, false, false, 2, 2, 128>;
+template struct WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
+    IdentityActivation, false, true, 2, 2, 128>;
+template struct WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
+    IdentityActivation, true, false, 2, 2, 128>;
+template struct WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
+    IdentityActivation, true, true, 2, 2, 128>;
+
 
 template struct WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyGroupWise<64>,
     IdentityActivation, true, true, 2, 2, 256>;

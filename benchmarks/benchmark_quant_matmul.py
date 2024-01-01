@@ -22,8 +22,8 @@ wfp16 = torch.randn(n, k, dtype=dtype, device=device)
 w = torch.randint(-128, 127, (k, n // (8 // bits)), dtype=torch.int8, device=device)
 wscale = torch.ones(n, dtype=dtype, device=device)
 x = torch.randn(batch, k, dtype=dtype, device=device)
-# bias = torch.randn(n, dtype=dtype, device=device)
-bias = None
+bias = torch.randn(n, dtype=dtype, device=device)
+# bias = None
 wpacked = preprocess_weight(w, bits)
 pytorch_profiler(F.linear, x, wfp16)
 pytorch_profiler(quant_matmul_fn, x, wpacked, wscale, 1.0, bias, bits)

@@ -26,8 +26,8 @@ def test_preprocess_weight(in_features, out_features, bits):
 
 @pytest.mark.parametrize("bits", [8, 4])
 # @pytest.mark.parametrize("bits", [8])
-# @pytest.mark.parametrize("has_bias", [False, True])
-@pytest.mark.parametrize("has_bias", [False])
+@pytest.mark.parametrize("has_bias", [False, True])
+# @pytest.mark.parametrize("has_bias", [False])
 @pytest.mark.parametrize("batch", [1, 2, 3, 4, 5, 8, 16, 37])
 # @pytest.mark.parametrize("batch", [1, 2, 3, 4])
 # @pytest.mark.parametrize("batch", [8])

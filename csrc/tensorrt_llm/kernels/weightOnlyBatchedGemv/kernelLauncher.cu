@@ -123,8 +123,7 @@ void weight_only_batched_gemv_launcher(const WeightOnlyParams& params, cudaStrea
 {
     assert(params.act_func_type == WeightOnlyActivationFunctionType::Identity);
     assert(params.weight_only_type == WeightOnlyType::GroupWise
-        || (params.weight_only_type == WeightOnlyType::PerChannel && params.bias == nullptr
-            && params.zeros == nullptr));
+        || (params.weight_only_type == WeightOnlyType::PerChannel && params.zeros == nullptr));
     if (params.weight_only_type == WeightOnlyType::PerChannel)
     {
         if (params.quant_type == WeightOnlyQuantType::Int4b)
@@ -133,26 +132,26 @@ void weight_only_batched_gemv_launcher(const WeightOnlyParams& params, cudaStrea
             {
             case 1:
             {
-                WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
-                    IdentityActivation, false, false, 1, 1, 192>::run(params, stream);
+                select_zero_bias<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
+                    IdentityActivation, 1, 1, 192>(params, stream);
                 break;
             }
             case 2:
             {
-                WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
-                    IdentityActivation, false, false, 2, 2, 128>::run(params, stream);
+                select_zero_bias<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
+                    IdentityActivation, 2, 2, 128>(params, stream);
                 break;
             }
             case 3:
             {
-                WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
-                    IdentityActivation, false, false, 2, 3, 256>::run(params, stream);
+                select_zero_bias<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
+                    IdentityActivation, 2, 3, 256>(params, stream);
                 break;
             }
             case 4:
             {
-                WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
-                    IdentityActivation, false, false, 4, 4, 256>::run(params, stream);
+                select_zero_bias<WeightOnlyQuantType::Int4b, WeightOnlyPerChannel,
+                    IdentityActivation, 4, 4, 256>(params, stream);
                 break;
             }
             default:
@@ -168,26 +167,26 @@ void weight_only_batched_gemv_launcher(const WeightOnlyParams& params, cudaStrea
             {
             case 1:
             {
-                WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int8b, WeightOnlyPerChannel,
-                    IdentityActivation, false, false, 2, 1, 256>::run(params, stream);
+                select_zero_bias<WeightOnlyQuantType::Int8b, WeightOnlyPerChannel,
+                    IdentityActivation, 2, 1, 256>(params, stream);
                 break;
             }
             case 2:
             {
-                WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int8b, WeightOnlyPerChannel,
-                    IdentityActivation, false, false, 2, 2, 256>::run(params, stream);
+                select_zero_bias<WeightOnlyQuantType::Int8b, WeightOnlyPerChannel,
+                    IdentityActivation, 2, 2, 256>(params, stream);
                 break;
             }
             case 3:
             {
-                WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int8b, WeightOnlyPerChannel,
-                    IdentityActivation, false, false, 2, 3, 256>::run(params, stream);
+                select_zero_bias<WeightOnlyQuantType::Int8b, WeightOnlyPerChannel,
+                    IdentityActivation, 2, 3, 256>(params, stream);
                 break;
             }
             case 4:
             {
-                WeightOnlyBatchedGemvKernelLauncher<WeightOnlyQuantType::Int8b, WeightOnlyPerChannel,
-                    IdentityActivation, false, false, 2, 4, 256>::run(params, stream);
+                select_zero_bias<WeightOnlyQuantType::Int8b, WeightOnlyPerChannel,
+                    IdentityActivation, 2, 4, 256>(params, stream);
                 break;
             }
             default:
