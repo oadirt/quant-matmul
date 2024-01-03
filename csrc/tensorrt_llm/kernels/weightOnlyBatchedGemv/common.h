@@ -77,6 +77,7 @@ struct WeightOnlyParams
     const int k;
     const int group_size;
     const float global_scale;
+    const float global_bias;
     WeightOnlyQuantType quant_type;
     WeightOnlyType weight_only_type;
     WeightOnlyActivationFunctionType act_func_type;
@@ -84,7 +85,7 @@ struct WeightOnlyParams
 
     WeightOnlyParams(const uint8_t* _qweight, const ActType* _scales, const ActType* _zeros, const ActType* _in,
         const ActType* _act_scale, const ActType* _bias, ActType* _out, const int _m, const int _n, const int _k,
-        const int _group_size, const float _global_scale, const WeightOnlyQuantType _quant_type, const WeightOnlyType _weight_only_type,
+        const int _group_size, const float _global_scale, const float _global_bias, const WeightOnlyQuantType _quant_type, const WeightOnlyType _weight_only_type,
         const WeightOnlyActivationFunctionType _act_func_type, const WeightOnlyActivationType _act_type)
         : qweight(_qweight)
         , scales(_scales)
@@ -98,6 +99,7 @@ struct WeightOnlyParams
         , k(_k)
         , group_size(_group_size)
         , global_scale(_global_scale)
+        , global_bias(_global_bias)
         , quant_type(_quant_type)
         , weight_only_type(_weight_only_type)
         , act_func_type(_act_func_type)

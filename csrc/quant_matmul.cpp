@@ -38,7 +38,7 @@
 
 template <typename WeightType, cutlass::WeightOnlyQuantOp QuantOp>
 void dispatch_to_weight_only_batched_gemv(const half* A, const WeightType* B, const half* weight_scales,
-    const half* weight_zero_points, const half* bias, half* C, int m, int n, int k, int group_size, float global_scale, cudaStream_t stream)
+    const half* weight_zero_points, const half* bias, half* C, int m, int n, int k, int group_size, float global_scale, float global_bias, cudaStream_t stream)
 {
     using namespace tensorrt_llm::kernels;
 
@@ -67,6 +67,7 @@ void dispatch_to_weight_only_batched_gemv(const half* A, const WeightType* B, co
         k,
         group_size,
         global_scale,
+        global_bias,
         weight_only_quant_type,
         weight_only_type,
         WeightOnlyActivationFunctionType::Identity,
@@ -78,16 +79,16 @@ void dispatch_to_weight_only_batched_gemv(const half* A, const WeightType* B, co
 
 template <typename WeightType, cutlass::WeightOnlyQuantOp QuantOp>
 void gemm_fp16_int_bias(const half* A, const WeightType* B, const half* weight_scales, const half* weight_zero_points,
-    const half* bias, half* C, int m, int n, int k, int group_size, float global_scale,
+    const half* bias, half* C, int m, int n, int k, int group_size, float global_scale, float global_bias,
     char* workspace_ptr, size_t workspace_bytes, cudaStream_t stream)
 {
     if (m <= 4) {
         dispatch_to_weight_only_batched_gemv<WeightType, QuantOp>(A, B, weight_scales, weight_zero_points,
-            bias, C, m, n, k, group_size, global_scale, stream);
+            bias, C, m, n, k, group_size, global_scale, global_bias, stream);
     } else {
         using namespace tensorrt_llm::kernels::cutlass_kernels;
         CutlassFpAIntBGemmRunner<half, WeightType, QuantOp> runner;
-        runner.gemm_bias(A, B, weight_scales, weight_zero_points, bias, C, m, n, k, group_size, global_scale, workspace_ptr, workspace_bytes, stream);
+        runner.gemm_bias(A, B, weight_scales, weight_zero_points, bias, C, m, n, k, group_size, global_scale, global_bias, workspace_ptr, workspace_bytes, stream);
     }
 
 }
@@ -116,7 +117,8 @@ at::Tensor preprocess_weight(at::Tensor quantized_weight, int bits) {
 
 at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
                         const c10::optional<at::Tensor> weight_scales_,
-                        const c10::optional<at::Tensor> weight_zero_points_, float global_scale,
+                        const c10::optional<at::Tensor> weight_zero_points_,
+                        float global_scale, float global_bias,
                         const c10::optional<at::Tensor> bias_, int bits) {
 
     TORCH_CHECK(bits == 4 || bits == 8);
@@ -136,6 +138,10 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
 
     bool is_finegrained = false;
     int group_size = k;
+
+    if (global_scale != 1.f || global_bias != 0.f) {
+        TORCH_CHECK(!weight_scales_.has_value() && !weight_zero_points_.has_value(), "global_scale and global_bias are only supported if weight_scales and weight_zero_points are None");
+    }
     if (weight_scales_.has_value()) {
         auto weight_scales = weight_scales_.value();
         TORCH_CHECK(weight_scales.dtype() == torch::kFloat16);
@@ -200,6 +206,7 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
                 k,
                 group_size,
                 global_scale,
+                global_bias,
                 has_workspace ? reinterpret_cast<char *>(workspace.data_ptr()) : nullptr,
                 has_workspace ? 1 << 22 : 0,
                 at::cuda::getCurrentCUDAStream());

@@ -380,7 +380,9 @@ public:
         ///< iterator over scale operand in global memory
         IteratorScale iterator_scale,
         ///< initial value of accumulator
-        FragmentC const& src_accum)
+        FragmentC const& src_accum,
+        const uint32_t global_scale_u,
+        const uint32_t global_bias_u)
     {
 
         //

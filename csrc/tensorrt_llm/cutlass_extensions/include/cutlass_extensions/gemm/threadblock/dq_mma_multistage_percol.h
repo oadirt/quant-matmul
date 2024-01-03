@@ -340,7 +340,9 @@ public:
         ///< iterator over scale operand in global memory
         IteratorScale iterator_scale,
         ///< initial value of accumulator
-        FragmentC const& src_accum)
+        FragmentC const& src_accum,
+        const uint32_t global_scale_u,
+        const uint32_t global_bias_u)
     {
 
         //
@@ -546,6 +548,15 @@ public:
 
                 typename TransformBAfterLDS::result_type converted_frag_B
                     = lds_converter(warp_frag_B[warp_tileB_k_load_offset % 2]);
+                // TD [2024-01-02] HACK: this only works for fp16, not bf16
+                if constexpr (QuantOp == WeightOnlyQuantOp::PER_TENSOR_ONLY) {
+                    static_assert(TransformBAfterLDS::result_type::kElements % 2 == 0);
+                    __half2 *frag_B_ptr = reinterpret_cast<__half2*>(&converted_frag_B);
+                    #pragma unroll
+                    for (int i = 0; i < TransformBAfterLDS::result_type::kElements / 2; ++i) {
+                        frag_B_ptr[i] = __hfma2(frag_B_ptr[i], reinterpret_cast<const __half2&>(global_scale_u), reinterpret_cast<const __half2&>(global_bias_u));
+                    }
+                }
                 if constexpr (hasScale(QuantOp)) { warp_dequantizer_.dequantize(converted_frag_B, warp_frag_scales); }
 
                 run_warp_mma(

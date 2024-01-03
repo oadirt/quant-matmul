@@ -134,6 +134,9 @@ struct GemmFpAIntB
         // Included so we can use Gemm Universal
         int batch_stride_D = 0;
 
+        const float global_scale;
+        const float global_bias;
+
         //
         // Methods
         //
@@ -147,6 +150,7 @@ struct GemmFpAIntB
             typename Mma::IteratorScale::TensorRef ref_scale, typename Mma::IteratorScale::TensorRef ref_zero,
             typename Epilogue::OutputTileIterator::TensorRef ref_C,
             typename Epilogue::OutputTileIterator::TensorRef ref_D, int serial_split_k_factor,
+            const float global_scale, const float global_bias,
             typename EpilogueOutputOp::Params output_op = typename EpilogueOutputOp::Params(),
             int const* gather_A_indices = nullptr, int const* gather_B_indices = nullptr,
             int const* scatter_D_indices = nullptr)
@@ -159,6 +163,8 @@ struct GemmFpAIntB
             , ref_C(ref_C)
             , ref_D(ref_D)
             , batch_count(serial_split_k_factor)
+            , global_scale(global_scale)
+            , global_bias(global_bias)
             , output_op(output_op)
             , gather_A_indices(gather_A_indices)
             , gather_B_indices(gather_B_indices)
@@ -193,6 +199,9 @@ struct GemmFpAIntB
         int const* gather_B_indices;
         int const* scatter_D_indices;
 
+        float global_scale;
+        float global_bias;
+
         //
         // Methods
         //
@@ -223,6 +232,8 @@ struct GemmFpAIntB
             , ref_C(args.ref_C)
             , params_D(args.ref_D.layout())
             , ref_D(args.ref_D)
+            , global_scale(args.global_scale)
+            , global_bias(args.global_bias)
             , output_op(args.output_op)
             , semaphore(static_cast<int*>(workspace))
             , gemm_k_size(gemm_k_size)
@@ -450,10 +461,15 @@ struct GemmFpAIntB
 
             accumulators.clear();
 
+            __half2 global_scale_f16 = __float2half2_rn(params.global_scale);
+            uint32_t global_scale_u = reinterpret_cast<uint32_t &>(global_scale_f16);
+            __half2 global_bias_f16 = __float2half2_rn(params.global_bias);
+            uint32_t global_bias_u = reinterpret_cast<uint32_t &>(global_bias_f16);
+
             if (!kSplitKSerial || gemm_k_iterations > 0)
             {
                 // Compute threadblock-scoped matrix multiply-add
-                mma(gemm_k_iterations, accumulators, iterator_A, iterator_B, iterator_scale, accumulators);
+                mma(gemm_k_iterations, accumulators, iterator_A, iterator_B, iterator_scale, accumulators, global_scale_u, global_bias_u);
             }
 
             //

@@ -14,7 +14,7 @@ repeats = 30
 dtype = torch.float16
 device = 'cuda'
 
-batch = 16
+batch = 1
 bits = 4
 k, n = 4096 * 2, 4096 * 2
 # k, n = 4096, 4096
@@ -24,10 +24,13 @@ w = torch.randint(-128, 127, (n // (8 // bits), k), dtype=torch.int8, device=dev
 wscale = None
 x = torch.randn(batch, k, dtype=dtype, device=device)
 bias = torch.randn(n, dtype=dtype, device=device)
-global_scale = 1.4
+global_scale = 1e-2
 # global_scale = 1.0
+global_bias = 0.5 * global_scale
+# global_bias = 0.0
 # bias = None
 wpacked = preprocess_weight(w, bits)
 pytorch_profiler(F.linear, x, wfp16)
-pytorch_profiler(quant_matmul_fn, x, wpacked, wscale, None, global_scale, bias, bits)
+pytorch_profiler(quant_matmul_fn, x, wpacked, wscale, None, global_scale, global_bias, bias, bits)
 pytorch_profiler(torch.clone, wpacked)
+benchmark_forward(quant_matmul_fn, x, wpacked, wscale, None, global_scale, global_bias, bias, bits)

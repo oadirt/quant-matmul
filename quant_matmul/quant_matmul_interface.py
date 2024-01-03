@@ -32,9 +32,10 @@ def preprocess_weight(weight, bits=4):
     return weight.contiguous()
 
 
-def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_scale=1.0, bias=None, bits=4):
+def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_scale=1.0, global_bias=0.0,
+                     bias=None, bits=4, upcast=False):
     """
-    Weight will be dequantized as (quantized_weight * scales + zero_points) * global_scale
+    Weight will be dequantized as ((quantized_weight * global_scale + global_bias) * scales + zero_points
     Arguments:
         x: (..., in_features), fp16
         quantized_weight: (out_features, in_features) if bits == 8, (out_features // 2, in_features)
@@ -43,6 +44,7 @@ def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_
         zero_points: (in_features / group_size, out_features) of (out_features,), fp16.
            (i.e. groupwise quantization).
         global_scale: float
+        global_bias: float
         bias: (out_features,), fp16
         bits: 4 or 8
     Return:
@@ -53,7 +55,13 @@ def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_
         quantized_weight = rearrange(
             torch.stack([(quantized_weight << 4) >> 4, quantized_weight >> 4], dim=1), "o two i -> (o two) i"
         )
-    w = quantized_weight.to(torch.float16)
+    w = quantized_weight.to(torch.float32 if upcast else torch.float16)
+    bias = bias.to(torch.float32 if upcast else torch.float16) if bias is not None else None
+    x = x.to(torch.float32 if upcast else torch.float16)
+    if global_scale != 1.0:
+        w *= global_scale
+    if global_bias != 0.0:
+        w += global_bias
     if scales is not None:
         assert scales.ndim in [1, 2]
         if scales.ndim == 1:
@@ -71,14 +79,13 @@ def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_
             assert w.shape[1] % groupsize == 0
             zero_points = repeat(zero_points, "ngroups n -> n (ngroups groupsize)", groupsize=groupsize)
         w += zero_points
-    if global_scale != 1.0:
-        w *= global_scale
     return F.linear(x, w, bias)
 
 
-def quant_matmul_fn(x, processed_weight, scales=None, zero_points=None, global_scale=1.0, bias=None, bits=4):
+def quant_matmul_fn(x, processed_weight, scales=None, zero_points=None, global_scale=1.0, global_bias=0.0,
+                    bias=None, bits=4):
     """
-    Weight will be dequantized as (quantized_weight * scales + zero_points) * global_scale
+    Weight will be dequantized as ((quantized_weight * global_scale + global_bias) * scales + zero_points
     Arguments:
         x: (..., in_features), fp16
         processed_weight: (out_features, in_features) if bits == 8, (out_features // 2, in_features)
@@ -88,9 +95,10 @@ def quant_matmul_fn(x, processed_weight, scales=None, zero_points=None, global_s
         zero_points: (in_features / group_size, out_features), fp16. Only supported if scales is 2D
            (i.e. groupwise quantization).
         global_scale: float
+        global_bias: float
         bias: (out_features,), fp16
         bits: 4 or 8
     Return:
         out: (..., out_features), fp16
     """
-    return quant_matmul_cuda.quant_matmul(x, processed_weight, scales, zero_points, global_scale, bias, bits)
+    return quant_matmul_cuda.quant_matmul(x, processed_weight, scales, zero_points, global_scale, global_bias, bias, bits)
