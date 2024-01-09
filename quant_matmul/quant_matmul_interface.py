@@ -85,7 +85,8 @@ def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_
 def quant_matmul_fn(x, processed_weight, scales=None, zero_points=None, global_scale=1.0, global_bias=0.0,
                     bias=None, bits=4):
     """
-    Weight will be dequantized as ((quantized_weight * global_scale + global_bias) * scales + zero_points
+    Weight will be dequantized as quantized_weight * global_scale + global_bias
+    or quantized_weight * scales + zero_points.
     Arguments:
         x: (..., in_features), fp16
         processed_weight: (out_features, in_features) if bits == 8, (out_features // 2, in_features)
@@ -101,4 +102,7 @@ def quant_matmul_fn(x, processed_weight, scales=None, zero_points=None, global_s
     Return:
         out: (..., out_features), fp16
     """
-    return quant_matmul_cuda.quant_matmul(x, processed_weight, scales, zero_points, global_scale, global_bias, bias, bits)
+    x_shape = x.shape
+    x = x.reshape(-1, x_shape[-1])
+    out = quant_matmul_cuda.quant_matmul(x, processed_weight, scales, zero_points, global_scale, global_bias, bias, bits)
+    return out.reshape(*x_shape[:-1], out.shape[-1])
