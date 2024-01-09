@@ -29,7 +29,7 @@ this_dir = os.path.dirname(os.path.abspath(__file__))
 PACKAGE_NAME = "quant_matmul"
 
 BASE_WHEEL_URL = (
-    "https://github.com/tridao/quant-matmul/releases/download/{tag_name}/{wheel_name}"
+    "https://github.com/oadirt/quant-matmul/releases/download/{tag_name}/{wheel_name}"
 )
 
 # FORCE_BUILD: Force a fresh build locally, instead of attempting to find prebuilt wheels
@@ -251,7 +251,7 @@ setup(
     description="Quantized MatMul in CUDA with a PyTorch interface",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/tridao/quant-matmul",
+    url="https://github.com/oadirt/quant-matmul",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: Apache Software License",
