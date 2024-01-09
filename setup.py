@@ -138,10 +138,11 @@ if not SKIP_CUDA_BUILD:
                 "csrc/tensorrt_llm/kernels/weightOnlyBatchedGemv/weightOnlyBatchedGemvBs4Int8b.cu",
             ],
             extra_compile_args={
-                "cxx": ["-O3"],
+                "cxx": ["-O3", "-std=c++17"],
                 "nvcc": append_nvcc_threads(
                     [
                         "-O3",
+                        "-std=c++17",
                         "-U__CUDA_NO_HALF_OPERATORS__",
                         "-U__CUDA_NO_HALF_CONVERSIONS__",
                         "-U__CUDA_NO_BFLOAT16_OPERATORS__",
