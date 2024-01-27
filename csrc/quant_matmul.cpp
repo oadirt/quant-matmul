@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Tri Dao.
+ * Copyright (c) 2024, Tri Dao.
  */
 #include <torch/extension.h>
 #include <torch/torch.h>
@@ -14,6 +14,7 @@
 #include "tensorrt_llm/kernels/cutlass_kernels/cutlass_preprocessors.h"
 #include "tensorrt_llm/kernels/weightOnlyBatchedGemv/kernelLauncher.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/fpA_intB_gemm.h"
+#include "tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels.h"
 
 #include "static_switch.h"
 
@@ -216,8 +217,51 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
     return out;
 }
 
+at::Tensor moe_matmul(const at::Tensor input, const at::Tensor weight,
+                      const at::Tensor total_rows_before_expert) {
+
+    const int64_t total_rows = input.size(0);
+    const int64_t k = input.size(1);
+    const int64_t n = weight.size(1);
+    const int num_experts = weight.size(0);
+
+    TORCH_CHECK(input.dtype() == torch::kFloat16);
+    TORCH_CHECK(weight.dtype() == torch::kFloat16);
+    TORCH_CHECK(total_rows_before_expert.dtype() == torch::kInt64);
+    TORCH_CHECK(input.is_cuda());
+    TORCH_CHECK(weight.is_cuda());
+    TORCH_CHECK(total_rows_before_expert.is_cuda());
+    TORCH_CHECK(input.is_contiguous());
+    TORCH_CHECK(weight.is_contiguous());
+    TORCH_CHECK(total_rows_before_expert.is_contiguous());
+    CHECK_SHAPE(input, total_rows, k);
+    CHECK_SHAPE(weight, num_experts, n, k);
+
+    // Otherwise the kernel will be launched from cuda:0 device
+    // Cast to char to avoid compiler warning about narrowing
+    at::cuda::CUDAGuard device_guard{(char)input.get_device()};
+
+    // create output/workspace tensor
+    auto opts = input.options();
+    auto out = at::empty({total_rows, n}, opts);
+    at::Tensor workspace;
+    workspace = at::empty({1 << 22}, opts.dtype(torch::kInt8));
+
+    using namespace tensorrt_llm::kernels::cutlass_kernels;
+    tensorrt_llm::MoeGemmRunner<half, half> runner;
+    runner.moeGemm(
+        reinterpret_cast<half *>(input.data_ptr()),
+        reinterpret_cast<half *>(weight.data_ptr()), nullptr,
+        reinterpret_cast<half *>(out.data_ptr()),
+        reinterpret_cast<int64_t *>(total_rows_before_expert.data_ptr()),
+        total_rows, n, k, num_experts, at::cuda::getCurrentCUDAStream()
+    );
+    return out;
+}
+
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("preprocess_weight", &preprocess_weight, "Preprocess weight");
   m.def("quant_matmul", &quant_matmul, "Quant matmul");
+  m.def("moe_matmul", &moe_matmul, "MoE matmul");
 }
