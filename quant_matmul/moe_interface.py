@@ -2,12 +2,19 @@
 
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 
 from einops import rearrange
 
 import quant_matmul_cuda
 
 
+@torch.jit.script
+def swiglu(x1: Tensor, x2: Tensor) -> Tensor:
+    return F.silu(x1) * x2
+
+
+# @torch.compile
 def moe_mlp(x, fc1_weights, fc2_weights, gating, num_active_experts):
     """
     Arguments:
@@ -22,8 +29,7 @@ def moe_mlp(x, fc1_weights, fc2_weights, gating, num_active_experts):
     batch = x.shape[0]
     num_experts = fc1_weights.shape[0]
     expert_scales, indices = torch.topk(gating, num_active_experts, dim=-1)
-    expert_scales = torch.softmax(expert_scales, dim=-1)
-    indices_sorted, perm = torch.sort(indices.flatten(), dim=-1, stable=True)
+    indices_sorted, perm = torch.sort(indices.flatten(), dim=-1)
     x_dup = x[perm // num_active_experts]
     total_rows_before_expert = torch.searchsorted(
         indices_sorted,
@@ -31,13 +37,13 @@ def moe_mlp(x, fc1_weights, fc2_weights, gating, num_active_experts):
         side="right"
     )
     x1, x2 = quant_matmul_cuda.moe_matmul(x_dup, fc1_weights, total_rows_before_expert).chunk(2, dim=-1)
-    y = F.silu(x1) * x2
+    # y = F.silu(x1) * x2
+    y = swiglu(x1, x2)
     y = quant_matmul_cuda.moe_matmul(y, fc2_weights, total_rows_before_expert)
-    y_unpermuted = y[torch.argsort(perm)]
+    # y_unpermuted = y[torch.argsort(perm)]  # scatter is slightly faster
+    y_unpermuted = y.scatter(0, perm.unsqueeze(-1).expand(-1, y.shape[1]), y)
+    expert_scales = torch.softmax(expert_scales, dim=-1)
     out = torch.einsum("bei,be->bi", rearrange(y_unpermuted, "(b e) i -> b e i", e=num_active_experts), expert_scales)
-    # expert_scales_permuted = expert_scales.flatten()[perm]
-    # out_permuted = y * rearrange(expert_scales_permuted, "b -> b 1")
-    # out = out_permuted.scatter_add(1, torch.arange(batch * num_active_experts, device=device, dtype=torch.int32).unsqueeze(-1), torch.zeros_like(out_permuted))
     return out
 
 

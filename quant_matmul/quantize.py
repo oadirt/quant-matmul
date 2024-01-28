@@ -20,7 +20,8 @@ def quantize_symmetric(weight, bits=4):
     scales = scales.clamp(min=torch.finfo(torch.float32).eps).to(torch.float16)
     qweight = (weight / scales[:, None]).round().to(torch.int8)
     if bits == 4:
-        qweight = qweight[::2] | (qweight[1::2] << 4)
+        # Need to shift qweight[::2] up and down to get the sign bit to move to the right place.
+        qweight = ((qweight[::2] << 4).view(torch.uint8) >> 4).view(torch.int8) | (qweight[1::2] << 4)
     return qweight, scales
 
 
