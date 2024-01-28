@@ -137,6 +137,7 @@ if not SKIP_CUDA_BUILD:
                 "csrc/tensorrt_llm/kernels/weightOnlyBatchedGemv/weightOnlyBatchedGemvBs4Int4b.cu",
                 "csrc/tensorrt_llm/kernels/weightOnlyBatchedGemv/weightOnlyBatchedGemvBs4Int8b.cu",
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp16_fp16.cu",
+                "csrc/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemv_kernels.cu",
             ],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++17"],

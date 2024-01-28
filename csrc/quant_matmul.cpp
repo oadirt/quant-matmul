@@ -15,6 +15,7 @@
 #include "tensorrt_llm/kernels/weightOnlyBatchedGemv/kernelLauncher.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/fpA_intB_gemm.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels.h"
+#include "tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemv_kernels.h"
 
 #include "static_switch.h"
 
@@ -244,18 +245,25 @@ at::Tensor moe_matmul(const at::Tensor input, const at::Tensor weight,
     // create output/workspace tensor
     auto opts = input.options();
     auto out = at::empty({total_rows, n}, opts);
-    at::Tensor workspace;
-    workspace = at::empty({1 << 22}, opts.dtype(torch::kInt8));
 
-    using namespace tensorrt_llm::kernels::cutlass_kernels;
-    tensorrt_llm::MoeGemmRunner<half, half> runner;
-    runner.moeGemm(
-        reinterpret_cast<half *>(input.data_ptr()),
-        reinterpret_cast<half *>(weight.data_ptr()), nullptr,
-        reinterpret_cast<half *>(out.data_ptr()),
-        reinterpret_cast<int64_t *>(total_rows_before_expert.data_ptr()),
-        total_rows, n, k, num_experts, at::cuda::getCurrentCUDAStream()
-    );
+    if (total_rows <= 2 && k % 8 == 0) {
+        tensorrt_llm::kernels::moe_gemv(
+            reinterpret_cast<half *>(input.data_ptr()),
+            reinterpret_cast<half *>(weight.data_ptr()),
+            reinterpret_cast<half *>(out.data_ptr()),
+            reinterpret_cast<int64_t *>(total_rows_before_expert.data_ptr()),
+            total_rows, n, k, num_experts, at::cuda::getCurrentCUDAStream()
+       );
+    } else {
+        tensorrt_llm::MoeGemmRunner<half, half> runner;
+        runner.moeGemm(
+            reinterpret_cast<half *>(input.data_ptr()),
+            reinterpret_cast<half *>(weight.data_ptr()), nullptr,
+            reinterpret_cast<half *>(out.data_ptr()),
+            reinterpret_cast<int64_t *>(total_rows_before_expert.data_ptr()),
+            total_rows, n, k, num_experts, at::cuda::getCurrentCUDAStream()
+        );
+    }
     return out;
 }
 
