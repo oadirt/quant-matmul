@@ -1,9 +1,10 @@
-# Copyright (c) 2023, Tri Dao.
+# Copyright (c) 2024, Tri Dao.
 
 import sys
 import warnings
 import os
 import re
+import shutil
 import ast
 from pathlib import Path
 from packaging.version import parse, Version
@@ -23,14 +24,13 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtensio
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
+
 # ninja build does not work unless include_dirs are abs path
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
 PACKAGE_NAME = "quant_matmul"
 
-BASE_WHEEL_URL = (
-    "https://github.com/oadirt/quant-matmul/releases/download/{tag_name}/{wheel_name}"
-)
+BASE_WHEEL_URL = "https://github.com/oadirt/quant-matmul/releases/download/{tag_name}/{wheel_name}"
 
 # FORCE_BUILD: Force a fresh build locally, instead of attempting to find prebuilt wheels
 # SKIP_CUDA_BUILD: Intended to allow CI to use a simple `python setup.py sdist` run to copy over raw files, without any cuda compilation
@@ -229,7 +229,7 @@ class CachedWheelsCommand(_bdist_wheel):
 
             wheel_path = os.path.join(self.dist_dir, archive_basename + ".whl")
             print("Raw wheel path", wheel_path)
-            os.rename(wheel_filename, wheel_path)
+            shutil.move(wheel_filename, wheel_path)
         except urllib.error.HTTPError:
             print("Precompiled wheel not found. Building from source...")
             # If the wheel could not be downloaded, build from source
@@ -237,6 +237,7 @@ class CachedWheelsCommand(_bdist_wheel):
 
 setup(
     name=PACKAGE_NAME,
+    version=get_package_version(),
     packages=find_packages(
         exclude=(
             "build",
