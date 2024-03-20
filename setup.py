@@ -137,6 +137,7 @@ if not SKIP_CUDA_BUILD:
                 "csrc/tensorrt_llm/kernels/weightOnlyBatchedGemv/weightOnlyBatchedGemvBs4Int4b.cu",
                 "csrc/tensorrt_llm/kernels/weightOnlyBatchedGemv/weightOnlyBatchedGemvBs4Int8b.cu",
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_fp16_fp16.cu",
+                "csrc/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels_bf16_bf16.cu",
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemv_kernels.cu",
             ],
             extra_compile_args={
@@ -154,6 +155,7 @@ if not SKIP_CUDA_BUILD:
                         "--expt-relaxed-constexpr",
                         "--expt-extended-lambda",
                         "--use_fast_math",
+                        "-DENABLE_BF16"
                     ]
                     + cc_flag
                 ),

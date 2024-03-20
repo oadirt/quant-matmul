@@ -226,8 +226,10 @@ at::Tensor moe_matmul(const at::Tensor input, const at::Tensor weight,
     const int64_t n = weight.size(1);
     const int num_experts = weight.size(0);
 
-    TORCH_CHECK(input.dtype() == torch::kFloat16);
-    TORCH_CHECK(weight.dtype() == torch::kFloat16);
+    auto input_type = input.scalar_type();
+    TORCH_CHECK(input_type == at::ScalarType::Half ||
+                input_type == at::ScalarType::BFloat16);
+    TORCH_CHECK(weight.scalar_type() == input_type);
     TORCH_CHECK(total_rows_before_expert.dtype() == torch::kInt64);
     TORCH_CHECK(input.is_cuda());
     TORCH_CHECK(weight.is_cuda());
@@ -246,7 +248,7 @@ at::Tensor moe_matmul(const at::Tensor input, const at::Tensor weight,
     auto opts = input.options();
     auto out = at::empty({total_rows, n}, opts);
 
-    if (total_rows <= 2 && k % 8 == 0) {
+    if (input_type == at::ScalarType::Half && total_rows <= 2 && k % 8 == 0) {
         tensorrt_llm::kernels::moe_gemv(
             reinterpret_cast<half *>(input.data_ptr()),
             reinterpret_cast<half *>(weight.data_ptr()),
@@ -255,14 +257,24 @@ at::Tensor moe_matmul(const at::Tensor input, const at::Tensor weight,
             total_rows, n, k, num_experts, at::cuda::getCurrentCUDAStream()
        );
     } else {
-        tensorrt_llm::MoeGemmRunner<half, half> runner;
-        runner.moeGemm(
-            reinterpret_cast<half *>(input.data_ptr()),
-            reinterpret_cast<half *>(weight.data_ptr()), nullptr,
-            reinterpret_cast<half *>(out.data_ptr()),
-            reinterpret_cast<int64_t *>(total_rows_before_expert.data_ptr()),
-            total_rows, n, k, num_experts, at::cuda::getCurrentCUDAStream()
-        );
+        if (input_type == at::ScalarType::Half) {
+            tensorrt_llm::MoeGemmRunner<half, half> runner;
+            runner.moeGemm(
+                reinterpret_cast<half *>(input.data_ptr()),
+                reinterpret_cast<half *>(weight.data_ptr()), nullptr,
+                reinterpret_cast<half *>(out.data_ptr()),
+                reinterpret_cast<int64_t *>(total_rows_before_expert.data_ptr()),
+                total_rows, n, k, num_experts, at::cuda::getCurrentCUDAStream()
+            );
+        } else {
+          tensorrt_llm::MoeGemmRunner<__nv_bfloat16, __nv_bfloat16> runner;
+          runner.moeGemm(
+              reinterpret_cast<__nv_bfloat16 *>(input.data_ptr()),
+              reinterpret_cast<__nv_bfloat16 *>(weight.data_ptr()), nullptr,
+              reinterpret_cast<__nv_bfloat16 *>(out.data_ptr()),
+              reinterpret_cast<int64_t *>(total_rows_before_expert.data_ptr()),
+              total_rows, n, k, num_experts, at::cuda::getCurrentCUDAStream());
+        }
     }
     return out;
 }
