@@ -2,3 +2,5 @@
 build/
 dist/
 quant_matmul.egg-info/
+*.so
+*.pyc

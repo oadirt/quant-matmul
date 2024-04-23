@@ -37,15 +37,15 @@ def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_
     """
     Weight will be dequantized as ((quantized_weight * global_scale + global_bias) * scales + zero_points
     Arguments:
-        x: (..., in_features), fp16
+        x: (..., in_features), fp16 or bf16
         quantized_weight: (out_features, in_features) if bits == 8, (out_features // 2, in_features)
             if bits == 4, stored in int8
-        scales: (in_features / group_size, out_features) or (out_features,), fp16
-        zero_points: (in_features / group_size, out_features) of (out_features,), fp16.
+        scales: (in_features / group_size, out_features) or (out_features,), fp16 or bf16
+        zero_points: (in_features / group_size, out_features) of (out_features,), fp16 or bf16.
            (i.e. groupwise quantization).
         global_scale: float
         global_bias: float
-        bias: (out_features,), fp16
+        bias: (out_features,), fp16 or bf16
         bits: 4 or 8
     Return:
         out: (..., out_features), fp16
@@ -55,9 +55,12 @@ def quant_matmul_ref(x, quantized_weight, scales=None, zero_points=None, global_
         quantized_weight = rearrange(
             torch.stack([(quantized_weight << 4) >> 4, quantized_weight >> 4], dim=1), "o two i -> (o two) i"
         )
-    w = quantized_weight.to(torch.float32 if upcast else torch.float16)
-    bias = bias.to(torch.float32 if upcast else torch.float16) if bias is not None else None
-    x = x.to(torch.float32 if upcast else torch.float16)
+    act_dtype = x.dtype
+    assert act_dtype in [torch.float16, torch.bfloat16]
+
+    w = quantized_weight.to(torch.float32 if upcast else act_dtype)
+    bias = bias.to(torch.float32 if upcast else act_dtype) if bias is not None else None
+    x = x.to(torch.float32 if upcast else act_dtype)
     if global_scale != 1.0:
         w *= global_scale
     if global_bias != 0.0:
