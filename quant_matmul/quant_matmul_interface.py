@@ -88,16 +88,16 @@ def quant_matmul_fn(x, processed_weight, scales=None, zero_points=None, global_s
     Weight will be dequantized as quantized_weight * global_scale + global_bias
     or quantized_weight * scales + zero_points.
     Arguments:
-        x: (..., in_features), fp16
+        x: (..., in_features), fp16 or bf16
         processed_weight: (out_features, in_features) if bits == 8, (out_features // 2, in_features)
             if bits == 4, stored in int8. The weight is in column-major format, returned by the
             preprocess_weight function.
-        scales: (in_features / group_size, out_features) or (out_features,), fp16
-        zero_points: (in_features / group_size, out_features), fp16. Only supported if scales is 2D
+        scales: (in_features / group_size, out_features) or (out_features,), fp16 or bf16
+        zero_points: (in_features / group_size, out_features), fp16 or bf16. Only supported if scales is 2D
            (i.e. groupwise quantization).
         global_scale: float
         global_bias: float
-        bias: (out_features,), fp16
+        bias: (out_features,), fp16 or bf16
         bits: 4 or 8
     Return:
         out: (..., out_features), fp16

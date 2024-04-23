@@ -7,11 +7,13 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <vector>
 
+#include "c10/core/ScalarType.h"
 #include "cutlass/numeric_types.h"
 #include "cutlass/integer_subbyte.h"
 
 #include "cutlass_extensions/weight_only_quant_op.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/cutlass_preprocessors.h"
+#include "tensorrt_llm/kernels/weightOnlyBatchedGemv/common.h"
 #include "tensorrt_llm/kernels/weightOnlyBatchedGemv/kernelLauncher.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/fpA_intB_gemm.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels.h"
@@ -38,9 +40,9 @@
         }                                                                                               \
     }()
 
-template <typename WeightType, cutlass::WeightOnlyQuantOp QuantOp>
-void dispatch_to_weight_only_batched_gemv(const half* A, const WeightType* B, const half* weight_scales,
-    const half* weight_zero_points, const half* bias, half* C, int m, int n, int k, int group_size, float global_scale, float global_bias, cudaStream_t stream)
+template <typename ActType, typename WeightType, cutlass::WeightOnlyQuantOp QuantOp>
+void dispatch_to_weight_only_batched_gemv(const ActType* A, const WeightType* B, const ActType* weight_scales,
+    const ActType* weight_zero_points, const ActType* bias, ActType* C, int m, int n, int k, int group_size, float global_scale, float global_bias, cudaStream_t stream)
 {
     using namespace tensorrt_llm::kernels;
 
@@ -58,12 +60,12 @@ void dispatch_to_weight_only_batched_gemv(const half* A, const WeightType* B, co
     // https://github.com/NVIDIA/TensorRT-LLM/blob/d37b507f41a87457fe9f10f7459d08f5db235745/cpp/tensorrt_llm/plugins/weightOnlyGroupwiseQuantMatmulPlugin/weightOnlyGroupwiseQuantMatmulPlugin.cpp#L363
     WeightOnlyParams params{
         /*qweight=*/reinterpret_cast<const uint8_t*>(B),
-        /*scales=*/reinterpret_cast<const half*>(weight_scales),
-        /*zeros=*/reinterpret_cast<const half*>(weight_zero_points),
-        /*in=*/reinterpret_cast<const half*>(A),
+        /*scales=*/reinterpret_cast<const ActType*>(weight_scales),
+        /*zeros=*/reinterpret_cast<const ActType*>(weight_zero_points),
+        /*in=*/reinterpret_cast<const ActType*>(A),
         /*act_scale=*/nullptr,
-        /*bias=*/reinterpret_cast<const half*>(bias),
-        /*out=*/reinterpret_cast<half*>(C),
+        /*bias=*/reinterpret_cast<const ActType*>(bias),
+        /*out=*/reinterpret_cast<ActType*>(C),
         m,
         n,
         k,
@@ -73,23 +75,25 @@ void dispatch_to_weight_only_batched_gemv(const half* A, const WeightType* B, co
         weight_only_quant_type,
         weight_only_type,
         WeightOnlyActivationFunctionType::Identity,
-        WeightOnlyActivationType::FP16
+        WeightOnlyActivationTypeSelector<ActType>::value
     };
 
     weight_only_batched_gemv_launcher(params, stream);
 }
 
-template <typename WeightType, cutlass::WeightOnlyQuantOp QuantOp>
-void gemm_fp16_int_bias(const half* A, const WeightType* B, const half* weight_scales, const half* weight_zero_points,
-    const half* bias, half* C, int m, int n, int k, int group_size, float global_scale, float global_bias,
+template <typename ActType, typename WeightType, cutlass::WeightOnlyQuantOp QuantOp>
+void gemm_fp16_int_bias(const ActType* A, const WeightType* B, const ActType* weight_scales, const ActType* weight_zero_points,
+    const ActType* bias, ActType* C, int m, int n, int k, int group_size, float global_scale, float global_bias,
     char* workspace_ptr, size_t workspace_bytes, cudaStream_t stream)
 {
+    static_assert(std::is_same_v<ActType, half> || std::is_same_v<ActType, __nv_bfloat16>, "Only half or bfloat16 is supported for ActType");
+
     if (m <= 4) {
-        dispatch_to_weight_only_batched_gemv<WeightType, QuantOp>(A, B, weight_scales, weight_zero_points,
+        dispatch_to_weight_only_batched_gemv<ActType, WeightType, QuantOp>(A, B, weight_scales, weight_zero_points,
             bias, C, m, n, k, group_size, global_scale, global_bias, stream);
     } else {
         using namespace tensorrt_llm::kernels::cutlass_kernels;
-        CutlassFpAIntBGemmRunner<half, WeightType, QuantOp> runner;
+        CutlassFpAIntBGemmRunner<ActType, WeightType, QuantOp> runner;
         runner.gemm_bias(A, B, weight_scales, weight_zero_points, bias, C, m, n, k, group_size, global_scale, global_bias, workspace_ptr, workspace_bytes, stream);
     }
 
@@ -129,7 +133,7 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
     const int n = weight.size(0);
     TORCH_CHECK(n % 8 == 0);
 
-    TORCH_CHECK(input.dtype() == torch::kFloat16);
+    TORCH_CHECK(input.dtype() == torch::kFloat16 || input.dtype() == torch::kBFloat16);
     TORCH_CHECK(weight.dtype() == torch::kInt8);
     TORCH_CHECK(input.is_cuda());
     TORCH_CHECK(weight.is_cuda());
@@ -146,7 +150,8 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
     }
     if (weight_scales_.has_value()) {
         auto weight_scales = weight_scales_.value();
-        TORCH_CHECK(weight_scales.dtype() == torch::kFloat16);
+        TORCH_CHECK(weight_scales.dtype() == torch::kFloat16 || weight_scales.dtype() == torch::kBFloat16);
+        TORCH_CHECK(weight_scales.dtype() == input.dtype());
         TORCH_CHECK(weight_scales.is_cuda());
         TORCH_CHECK(weight_scales.is_contiguous());
         is_finegrained = weight_scales.dim() == 2;
@@ -165,7 +170,8 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
     if (weight_zero_points_.has_value()) {
         TORCH_CHECK(is_finegrained, "weight_zero_points is only supported if using groupwise quantization");
         auto weight_zero_points = weight_zero_points_.value();
-        TORCH_CHECK(weight_zero_points.dtype() == torch::kFloat16);
+        TORCH_CHECK(weight_zero_points.dtype() == torch::kFloat16 || weight_zero_points.dtype() == torch::kBFloat16);
+        TORCH_CHECK(weight_zero_points.dtype() == input.dtype());
         TORCH_CHECK(weight_zero_points.is_cuda());
         TORCH_CHECK(weight_zero_points.is_contiguous());
         CHECK_SHAPE(weight_zero_points, k / group_size, n);
@@ -173,7 +179,8 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
 
     if (bias_.has_value()) {
         auto bias = bias_.value();
-        TORCH_CHECK(bias.dtype() == torch::kFloat16);
+        TORCH_CHECK(bias.dtype() == torch::kFloat16 || bias.dtype() == torch::kBFloat16);
+        TORCH_CHECK(bias.dtype() == input.dtype());
         TORCH_CHECK(bias.is_cuda());
         TORCH_CHECK(bias.is_contiguous());
         CHECK_SHAPE(bias, n);
@@ -194,24 +201,27 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
         ? (weight_scales_.has_value() ? cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY : cutlass::WeightOnlyQuantOp::PER_TENSOR_ONLY)
         : (!weight_zero_points_.has_value() ? cutlass::WeightOnlyQuantOp::FINEGRAINED_SCALE_ONLY : cutlass::WeightOnlyQuantOp::FINEGRAINED_SCALE_AND_ZEROS);
     BOOL_SWITCH(bits == 4, kIs4Bits, [&] {
-        using WeightType = std::conditional_t<kIs4Bits, cutlass::uint4b_t, uint8_t>;
-        QUANTOP_SWITCH(quantop, kQuantOp, [&] {
-            gemm_fp16_int_bias<WeightType, kQuantOp>(
-                reinterpret_cast<half *>(input.data_ptr()),
-                reinterpret_cast<WeightType *>(weight.data_ptr()),
-                weight_scales_.has_value()? reinterpret_cast<half *>(weight_scales_.value().data_ptr()) : nullptr,
-                weight_zero_points_.has_value() ? reinterpret_cast<half *>(weight_zero_points_.value().data_ptr()) : nullptr,
-                bias_.has_value() ? reinterpret_cast<half *>(bias_.value().data_ptr()) : nullptr,
-                reinterpret_cast<half *>(out.data_ptr()),
-                m,
-                n,
-                k,
-                group_size,
-                global_scale,
-                global_bias,
-                has_workspace ? reinterpret_cast<char *>(workspace.data_ptr()) : nullptr,
-                has_workspace ? 1 << 22 : 0,
-                at::cuda::getCurrentCUDAStream());
+        BOOL_SWITCH(input.dtype() == torch::kBFloat16, kIsBf16Act, [&] {
+            using ActType = std::conditional_t<kIsBf16Act, __nv_bfloat16, half>;
+            using WeightType = std::conditional_t<kIs4Bits, cutlass::uint4b_t, uint8_t>;
+            QUANTOP_SWITCH(quantop, kQuantOp, [&] {
+                gemm_fp16_int_bias<ActType, WeightType, kQuantOp>(
+                    reinterpret_cast<ActType *>(input.data_ptr()),
+                    reinterpret_cast<WeightType *>(weight.data_ptr()),
+                    weight_scales_.has_value()? reinterpret_cast<ActType *>(weight_scales_.value().data_ptr()) : nullptr,
+                    weight_zero_points_.has_value() ? reinterpret_cast<ActType *>(weight_zero_points_.value().data_ptr()) : nullptr,
+                    bias_.has_value() ? reinterpret_cast<ActType *>(bias_.value().data_ptr()) : nullptr,
+                    reinterpret_cast<ActType *>(out.data_ptr()),
+                    m,
+                    n,
+                    k,
+                    group_size,
+                    global_scale,
+                    global_bias,
+                    has_workspace ? reinterpret_cast<char *>(workspace.data_ptr()) : nullptr,
+                    has_workspace ? 1 << 22 : 0,
+                    at::cuda::getCurrentCUDAStream());
+            });
         });
     });
 

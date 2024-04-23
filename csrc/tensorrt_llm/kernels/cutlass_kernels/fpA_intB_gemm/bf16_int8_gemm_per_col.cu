@@ -24,6 +24,7 @@ namespace cutlass_kernels
 {
 #ifdef ENABLE_BF16
 template class CutlassFpAIntBGemmRunner<__nv_bfloat16, uint8_t, cutlass::WeightOnlyQuantOp::PER_COLUMN_SCALE_ONLY>;
+template class CutlassFpAIntBGemmRunner<__nv_bfloat16, uint8_t, cutlass::WeightOnlyQuantOp::PER_TENSOR_ONLY>;
 #endif
 } // namespace cutlass_kernels
 } // namespace kernels

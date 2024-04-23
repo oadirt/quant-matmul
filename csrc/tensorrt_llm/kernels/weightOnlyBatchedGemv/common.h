@@ -59,6 +59,21 @@ enum class WeightOnlyActivationType
     BF16
 };
 
+template<typename T>
+struct WeightOnlyActivationTypeSelector;
+
+template<>
+struct WeightOnlyActivationTypeSelector<half> {
+    static constexpr WeightOnlyActivationType value = WeightOnlyActivationType::FP16;
+};
+
+#if defined(ENABLE_BF16)
+template<>
+struct WeightOnlyActivationTypeSelector<__nv_bfloat16> {
+    static constexpr WeightOnlyActivationType value = WeightOnlyActivationType::BF16;
+};
+#endif
+
 struct WeightOnlyParams
 {
     // ActType is fp16 or bf16

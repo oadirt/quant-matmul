@@ -121,6 +121,12 @@ if not SKIP_CUDA_BUILD:
                 "csrc/tensorrt_llm/common/logger.cpp",
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/cutlass_preprocessors.cpp",
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/cutlass_heuristic.cpp",
+                "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/bf16_int4_gemm_per_col.cu",
+                "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/bf16_int4_gemm_fg_scaleonly.cu",
+                "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/bf16_int4_gemm_fg_scalebias.cu",
+                "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/bf16_int8_gemm_per_col.cu",
+                "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/bf16_int8_gemm_fg_scaleonly.cu",
+                "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/bf16_int8_gemm_fg_scalebias.cu",
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/fp16_int4_gemm_per_col.cu",
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/fp16_int4_gemm_fg_scaleonly.cu",
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/fp16_int4_gemm_fg_scalebias.cu",
@@ -141,7 +147,7 @@ if not SKIP_CUDA_BUILD:
                 "csrc/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemv_kernels.cu",
             ],
             extra_compile_args={
-                "cxx": ["-O3", "-std=c++17"],
+                "cxx": ["-O3", "-std=c++17", "-DENABLE_BF16"],
                 "nvcc": append_nvcc_threads(
                     [
                         "-O3",
