@@ -7,13 +7,11 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <vector>
 
-#include "c10/core/ScalarType.h"
 #include "cutlass/numeric_types.h"
 #include "cutlass/integer_subbyte.h"
 
 #include "cutlass_extensions/weight_only_quant_op.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/cutlass_preprocessors.h"
-#include "tensorrt_llm/kernels/weightOnlyBatchedGemv/common.h"
 #include "tensorrt_llm/kernels/weightOnlyBatchedGemv/kernelLauncher.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/fpA_intB_gemm/fpA_intB_gemm.h"
 #include "tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_kernels.h"
@@ -82,7 +80,7 @@ void dispatch_to_weight_only_batched_gemv(const ActType* A, const WeightType* B,
 }
 
 template <typename ActType, typename WeightType, cutlass::WeightOnlyQuantOp QuantOp>
-void gemm_fp16_int_bias(const ActType* A, const WeightType* B, const ActType* weight_scales, const ActType* weight_zero_points,
+void gemm_fp16_bf16_int_bias(const ActType* A, const WeightType* B, const ActType* weight_scales, const ActType* weight_zero_points,
     const ActType* bias, ActType* C, int m, int n, int k, int group_size, float global_scale, float global_bias,
     char* workspace_ptr, size_t workspace_bytes, cudaStream_t stream)
 {
@@ -205,7 +203,7 @@ at::Tensor quant_matmul(const at::Tensor input, const at::Tensor weight,
             using ActType = std::conditional_t<kIsBf16Act, __nv_bfloat16, half>;
             using WeightType = std::conditional_t<kIs4Bits, cutlass::uint4b_t, uint8_t>;
             QUANTOP_SWITCH(quantop, kQuantOp, [&] {
-                gemm_fp16_int_bias<ActType, WeightType, kQuantOp>(
+                gemm_fp16_bf16_int_bias<ActType, WeightType, kQuantOp>(
                     reinterpret_cast<ActType *>(input.data_ptr()),
                     reinterpret_cast<WeightType *>(weight.data_ptr()),
                     weight_scales_.has_value()? reinterpret_cast<ActType *>(weight_scales_.value().data_ptr()) : nullptr,
